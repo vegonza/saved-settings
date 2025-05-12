@@ -33,6 +33,14 @@
                     "type": "string",
                     "default": "Code",
                     "description": "The folder name of your VS Code fork in the user application data directory (e.g., 'VSCodium', 'Code - Insiders', 'YourCustomFork'). This is used to locate settings.json and keybindings.json."
+                },
+                "settingsSave.gistId": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null,
+                    "description": "Optional. The ID of an existing GitHub Gist to use for syncing. If provided, the extension will use this Gist. If left empty, the extension will create a new Gist (or use a previously auto-created one)."
                 }
             }
         }

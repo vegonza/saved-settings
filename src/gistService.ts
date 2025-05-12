@@ -185,12 +185,29 @@ export class GistService {
         }
     }
 
+    // Helper to determine the Gist ID to use (checks config first, then global state)
+    private getEffectiveGistId(): string | undefined {
+        const extensionConfig = vscode.workspace.getConfiguration('settingsSave');
+        const configuredGistId = extensionConfig.get<string | null>('gistId');
+
+        if (configuredGistId && configuredGistId.trim()) {
+            console.log('Using Gist ID from configuration.');
+            return configuredGistId.trim(); // Use Gist ID from settings if provided
+        } else {
+            console.log('Checking global state for Gist ID.');
+            // Fallback to Gist ID stored in global state
+            return this.context.globalState.get<string>(GIST_ID_KEY);
+        }
+    }
+
     // --- Upload/Download ---
 
     public async uploadSettings(): Promise<void> {
+        let token: string;
+        let effectiveGistId: string | undefined;
         try {
-            const token = await this.getGitHubToken();
-            const gistId = this.context.globalState.get<string>(GIST_ID_KEY);
+            token = await this.getGitHubToken();
+            effectiveGistId = this.getEffectiveGistId(); // Use the helper function
 
             // Get content for each file
             const settingsContent = this.getUserSettingsContent();
@@ -223,36 +240,52 @@ export class GistService {
                 files: files
             };
 
-            if (gistId) {
+            if (effectiveGistId) { // Use the determined Gist ID
                 // Update existing Gist
-                await axios.patch(`https://api.github.com/gists/${gistId}`, gistPayload, { headers });
-                vscode.window.showInformationMessage('Settings, Keybindings, and Extensions successfully uploaded to existing Gist!');
+                vscode.window.showInformationMessage(`Updating existing Gist: ${effectiveGistId}...`);
+                await axios.patch(`https://api.github.com/gists/${effectiveGistId}`, gistPayload, { headers });
+                vscode.window.showInformationMessage('Configurations successfully uploaded to existing Gist!');
             } else {
                 // Create new Gist
+                vscode.window.showInformationMessage('No Gist ID found in config or state. Creating a new Gist...');
                 const response = await axios.post('https://api.github.com/gists', gistPayload, { headers });
                 const newGistId = response.data.id;
+                // Store the newly created Gist ID *only in global state*
                 await this.context.globalState.update(GIST_ID_KEY, newGistId);
-                vscode.window.showInformationMessage(`Settings, Keybindings, and Extensions successfully uploaded to new Gist: ${newGistId}`);
+                vscode.window.showInformationMessage(`Configurations successfully uploaded to new Gist: ${newGistId}. ID stored for future use.`);
             }
         } catch (error: any) {
-            console.error('Error uploading settings:', error);
+            console.error('Error uploading configurations:', error);
             const errorMessage = error.response?.data?.message || (error instanceof Error ? error.message : String(error));
             vscode.window.showErrorMessage(`Error uploading configurations: ${errorMessage}`);
-            // Consider removing the Gist ID if the upload failed due to Gist not found or auth issues
-            if (error.response?.status === 404 || error.response?.status === 401 || error.response?.status === 403) {
-                await this.context.globalState.update(GIST_ID_KEY, undefined);
-                vscode.window.showWarningMessage('Stored Gist ID might be invalid or permission issue. Gist ID cleared.');
+
+            // Specific handling if the Gist ID used (from config or state) was invalid
+            if (effectiveGistId && (error.response?.status === 404 || error.response?.status === 401 || error.response?.status === 403)) {
+                // If the problematic ID came from global state, clear it.
+                // If it came from config, we can't clear it, so just warn the user.
+                const configuredGistId = vscode.workspace.getConfiguration('settingsSave').get<string | null>('gistId');
+                if (configuredGistId && configuredGistId.trim() === effectiveGistId) {
+                    vscode.window.showErrorMessage(`The Gist ID configured in settings ('${effectiveGistId}') seems invalid or inaccessible. Please check the ID and GitHub permissions.`);
+                } else if (this.context.globalState.get<string>(GIST_ID_KEY) === effectiveGistId) {
+                    await this.context.globalState.update(GIST_ID_KEY, undefined);
+                    vscode.window.showWarningMessage(`Stored Gist ID ('${effectiveGistId}') was invalid or inaccessible and has been cleared from global state.`);
+                } else {
+                    // Should not happen based on getEffectiveGistId logic, but good to have a fallback
+                    vscode.window.showWarningMessage(`The Gist ID ('${effectiveGistId}') used was invalid or inaccessible.`);
+                }
             }
         }
     }
 
     public async downloadSettings(): Promise<void> {
+        let token: string;
+        let effectiveGistId: string | undefined;
         try {
-            const token = await this.getGitHubToken();
-            const gistId = this.context.globalState.get<string>(GIST_ID_KEY);
+            token = await this.getGitHubToken();
+            effectiveGistId = this.getEffectiveGistId(); // Use the helper function
 
-            if (!gistId) {
-                vscode.window.showInformationMessage('No Gist ID found. Please upload configurations first to create a Gist.');
+            if (!effectiveGistId) {
+                vscode.window.showInformationMessage('No Gist ID found in configuration or global state. Please configure a Gist ID or upload configurations first to create one.');
                 return;
             }
 
@@ -261,9 +294,9 @@ export class GistService {
                 'Accept': 'application/vnd.github.v3+json'
             };
 
-            vscode.window.showInformationMessage('Downloading configurations from Gist...');
+            vscode.window.showInformationMessage(`Downloading configurations from Gist: ${effectiveGistId}...`);
             // Fetch the Gist
-            const response = await axios.get(`https://api.github.com/gists/${gistId}`, { headers });
+            const response = await axios.get(`https://api.github.com/gists/${effectiveGistId}`, { headers });
             const gist = response.data;
 
             if (!gist.files) {
@@ -308,13 +341,23 @@ export class GistService {
             }
 
         } catch (error: any) {
-            console.error('Error downloading settings:', error);
+            console.error('Error downloading configurations:', error);
             const errorMessage = error.response?.data?.message || (error instanceof Error ? error.message : String(error));
             vscode.window.showErrorMessage(`Error downloading configurations: ${errorMessage}`);
-            // Consider removing the Gist ID if the download failed due to Gist not found or auth issues
-            if (error.response?.status === 404 || error.response?.status === 401 || error.response?.status === 403) {
-                await this.context.globalState.update(GIST_ID_KEY, undefined);
-                vscode.window.showWarningMessage('Stored Gist ID might be invalid or permission issue. Gist ID cleared.');
+
+            // Specific handling if the Gist ID used (from config or state) was invalid
+            if (effectiveGistId && (error.response?.status === 404 || error.response?.status === 401 || error.response?.status === 403)) {
+                // If the problematic ID came from global state, clear it.
+                // If it came from config, we can't clear it, so just warn the user.
+                const configuredGistId = vscode.workspace.getConfiguration('settingsSave').get<string | null>('gistId');
+                if (configuredGistId && configuredGistId.trim() === effectiveGistId) {
+                    vscode.window.showErrorMessage(`The Gist ID configured in settings ('${effectiveGistId}') seems invalid or inaccessible. Please check the ID and GitHub permissions.`);
+                } else if (this.context.globalState.get<string>(GIST_ID_KEY) === effectiveGistId) {
+                    await this.context.globalState.update(GIST_ID_KEY, undefined);
+                    vscode.window.showWarningMessage(`Stored Gist ID ('${effectiveGistId}') was invalid or inaccessible and has been cleared from global state.`);
+                } else {
+                    vscode.window.showWarningMessage(`The Gist ID ('${effectiveGistId}') used was invalid or inaccessible.`);
+                }
             }
         }
     }
