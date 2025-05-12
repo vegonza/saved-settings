@@ -115,22 +115,75 @@ export class GistService {
 
     // Applies settings from the downloaded content
     private async applyUserSettings(settingsContent: string): Promise<void> {
+        let appliedSettingsCount = 0;
+        let skippedSettings: string[] = [];
         try {
             const settingsObject = JSON.parse(settingsContent);
-            const config = vscode.workspace.getConfiguration();
+            const config = vscode.workspace.getConfiguration(); // Get config for the root
+
+            // Use Promise.all to run updates concurrently, but process results sequentially for logging
+            const updatePromises = [];
 
             for (const key in settingsObject) {
                 if (Object.prototype.hasOwnProperty.call(settingsObject, key)) {
                     const value = settingsObject[key];
-                    // Use update method to apply settings globally (User scope)
-                    // This is safer than overwriting settings.json directly
-                    await config.update(key, value, vscode.ConfigurationTarget.Global);
+                    // Push the update attempt into an array
+                    updatePromises.push(
+                        (async () => {
+                            try {
+                                // Attempt to update the setting globally (User scope)
+                                await config.update(key, value, vscode.ConfigurationTarget.Global);
+                                // console.log(`Successfully applied setting: ${key}`);
+                                return { success: true, key: key };
+                            } catch (error: any) {
+                                // Check if the error is specifically about an unregistered configuration
+                                if (error.message && error.message.includes('not a registered configuration')) {
+                                    console.warn(`Skipping unregistered setting: ${key}`);
+                                    skippedSettings.push(key);
+                                    return { success: false, key: key, skipped: true };
+                                } else {
+                                    // Log other errors and treat as failure
+                                    console.error(`Failed to apply setting: ${key}`, error);
+                                    return { success: false, key: key, skipped: false, error: error };
+                                }
+                            }
+                        })()
+                    );
                 }
             }
-            vscode.window.showInformationMessage('User settings applied successfully.');
-        } catch (error) {
-            console.error('Error applying user settings:', error);
-            vscode.window.showErrorMessage(`Failed to apply user settings: ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+            // Wait for all update attempts to settle
+            const results = await Promise.all(updatePromises);
+
+            // Process results
+            let failedSettings: { key: string, error: any }[] = [];
+            results.forEach(result => {
+                if (result.success) {
+                    appliedSettingsCount++;
+                } else if (!result.skipped) {
+                    failedSettings.push({ key: result.key, error: result.error });
+                }
+            });
+
+            // Report summary
+            if (appliedSettingsCount > 0) {
+                vscode.window.showInformationMessage(`Successfully applied ${appliedSettingsCount} user settings.`);
+            }
+            if (skippedSettings.length > 0) {
+                vscode.window.showWarningMessage(`Skipped ${skippedSettings.length} settings because they are not registered (likely missing extensions). Check logs for details.`);
+                console.warn('Skipped unregistered settings:', skippedSettings);
+            }
+            if (failedSettings.length > 0) {
+                vscode.window.showErrorMessage(`Failed to apply ${failedSettings.length} settings due to errors. Check logs for details.`);
+                console.error('Failed settings:', failedSettings);
+            }
+            if (appliedSettingsCount === 0 && skippedSettings.length === 0 && failedSettings.length === 0) {
+                vscode.window.showInformationMessage('No applicable user settings found in the downloaded file.');
+            }
+
+        } catch (parseError) {
+            console.error('Error parsing downloaded user settings JSON:', parseError);
+            vscode.window.showErrorMessage(`Failed to parse user settings file: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`);
         }
     }
 
