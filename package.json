@@ -1,0 +1,58 @@
+{
+	"name": "settings-save",
+	"displayName": "Settings Save",
+	"description": "Sync VSCode settings with GitHub Gists using built-in auth",
+	"version": "0.0.2",
+	"engines": {
+		"vscode": "^1.60.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onCommand:settings-save.uploadSettings",
+		"onCommand:settings-save.downloadSettings",
+		"onAuthenticationRequest:github"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "settings-save.uploadSettings",
+				"title": "Upload Settings to GitHub Gist"
+			},
+			{
+				"command": "settings-save.downloadSettings",
+				"title": "Download Settings from GitHub Gist"
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"pretest": "npm run compile && npm run lint",
+		"lint": "eslint src --ext ts",
+		"test": "node ./out/test/runTest.js"
+	},
+	"devDependencies": {
+		"@types/vscode": "^1.60.0",
+		"@types/glob": "^8.1.0",
+		"@types/mocha": "^10.0.6",
+		"@types/node": "18.x",
+		"@types/open": "^6.2.1",
+		"@typescript-eslint/eslint-plugin": "^7.11.0",
+		"@typescript-eslint/parser": "^7.11.0",
+		"eslint": "^8.57.0",
+		"glob": "^10.4.1",
+		"mocha": "^10.4.0",
+		"typescript": "^5.4.5",
+		"@vscode/test-electron": "^2.4.0"
+	},
+	"dependencies": {
+		"axios": "^0.21.4"
+	},
+	"__metadata": {
+		"size": 53067933
+	}
+}
